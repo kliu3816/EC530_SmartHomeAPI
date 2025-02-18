@@ -3,11 +3,14 @@ from fastapi.testclient import TestClient
 from main import app, get_db
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+
 
 DATABASE_URL = "sqlite:///:memory:"
 
 engine = create_engine(DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
 # Override the dependency to use test database
 def override_get_db():
