@@ -1,0 +1,18 @@
+trigger:
+  push:
+    branches: [main]
+
+steps:
+  - name: Clone repository
+    command: git clone --recursive https://github.com/[username]/[repo].git
+    - name: Install dependencies
+    command: npm install
+    - name: Run tests
+  command: python -m pytest tests/ -v
+  if: exit_code != 0
+
+  - name: Send test results
+  command: |
+    echo "Tests passed" if exit_code == 0; else "Tests failed"
+    curl -X POST https://[webhook_url]/?status=success&message=Tests passed
+    curl -X POST https://[webhook_url]/?status=failed&message=Tests failed
