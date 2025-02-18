@@ -1,18 +1,17 @@
 import pytest
 from fastapi.testclient import TestClient
-from main import app, get_db
+from main import app, get_db, Base  # Import Base from main
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
-
+from sqlalchemy.orm import declarative_base
 
 DATABASE_URL = "sqlite:///:memory:"
 
 engine = create_engine(DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
 
-# Override the dependency to use test database
+# Remove the Base redeclaration and use the one from main
+
 def override_get_db():
     try:
         db = TestingSessionLocal()
@@ -26,8 +25,10 @@ client = TestClient(app)
 
 @pytest.fixture(scope="function")
 def test_db():
+    # Create all tables before each test
     Base.metadata.create_all(bind=engine)
     yield
+    # Drop all tables after each test
     Base.metadata.drop_all(bind=engine)
 
 # User Tests
