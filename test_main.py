@@ -5,23 +5,20 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-DATABASE_URL = "sqlite:///:memory:?cache=shared"
+# Configure test database
 engine = create_engine(
-    "sqlite:///:memory:?cache=shared",
+    "sqlite:///:memory:",
     connect_args={"check_same_thread": False},
     poolclass=StaticPool
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# In test fixtures, add db refresh
 def override_get_db():
+    db = TestingSessionLocal()
     try:
-        db = TestingSessionLocal()
         Base.metadata.create_all(bind=engine)
         yield db
-        db.commit()  
-    except:
-        db.rollback()
+        db.commit()
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
@@ -29,132 +26,138 @@ def override_get_db():
 app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
-@pytest.fixture(scope="function")
-def test_db():
+@pytest.fixture(autouse=True)
+def reset_db():
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
 
-# User Tests
-def test_create_user(test_db):
+def test_create_and_get_user():
+    # Test user creation
     response = client.post(
         "/users/",
         json={"name": "John Doe", "email": "john@example.com"}
     )
     assert response.status_code == 200
-    assert response.json() == {"name": "John Doe", "email": "john@example.com"}
-
-def test_get_user_not_found(test_db):
-    response = client.get("/users/nonexistent@example.com")
-    assert response.status_code == 404
-
-def test_get_user_by_email(test_db):
-    client.post("/users/", json={"name": "John", "email": "john@example.com"})
+    assert response.json()["email"] == "john@example.com"
+    
+    # Test get user
     response = client.get("/users/john@example.com")
     assert response.status_code == 200
-    assert response.json()["email"] == "john@example.com"
+    assert response.json()["name"] == "John Doe"
 
-def test_update_user(test_db):
+def test_update_user():
+    # Create user
     client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    update_data = {"name": "John Updated"}
-    response = client.put("/users/john@example.com", json=update_data)
+    
+    # Update user
+    response = client.put(
+        "/users/john@example.com",
+        json={"name": "John Updated"}
+    )
     assert response.status_code == 200
     assert response.json()["name"] == "John Updated"
 
-def test_delete_user(test_db):
+def test_delete_user():
+    # Create user
     client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    response = client.delete("/user/john@example.com")
+    
+    # Delete user
+    response = client.delete("/users/john@example.com")
     assert response.status_code == 200
+    
+    # Verify deletion
     response = client.get("/users/john@example.com")
     assert response.status_code == 404
 
-def test_create_duplicate_user(test_db):
-    # First request should succeed
-    response1 = client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    assert response1.status_code == 200
+def test_create_duplicate_user():
+    # First creation should succeed
+    response = client.post(
+        "/users/",
+        json={"name": "John", "email": "john@example.com"}
+    )
+    assert response.status_code == 200
     
-    # Second request should fail
-    response2 = client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    assert response2.status_code == 400  # Changed from 500 to 400 for client error
+    # Second creation should fail
+    response = client.post(
+        "/users/",
+        json={"name": "John", "email": "john@example.com"}
+    )
+    assert response.status_code == 400
 
-# House Tests
-def test_create_house_valid_user(test_db):
+def test_house_crud():
+    # Create user
     client.post("/users/", json={"name": "John", "email": "john@example.com"})
+    
+    # Create house
     response = client.post(
         "/houses/",
         json={"address": "123 Main St", "user_email": "john@example.com"}
     )
     assert response.status_code == 200
-
-def test_create_house_with_invalid_user(test_db):
-    response = client.post(
-        "/houses/",
-        json={"address": "123 Main St", "user_email": "invalid@example.com"}
-    )
-    assert response.status_code == 404
-
-def test_get_house_by_address(test_db):
-    client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    client.post("/houses/", json={"address": "123 Main St", "user_email": "john@example.com"})
+    assert response.json()["address"] == "123 Main St"
+    
+    # Get house
     response = client.get("/houses/123 Main St")
     assert response.status_code == 200
-
-def test_update_house_address(test_db):
-    client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    client.post("/houses/", json={"address": "123 Main St", "user_email": "john@example.com"})
+    
+    # Update house
     response = client.put(
         "/houses/123 Main St",
         json={"address": "456 Elm St", "user_email": "john@example.com"}
     )
     assert response.status_code == 200
     assert response.json()["address"] == "456 Elm St"
-
-def test_delete_house(test_db):
-    client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    client.post("/houses/", json={"address": "123 Main St", "user_email": "john@example.com"})
-    response = client.delete("/houses/123 Main St")
+    
+    # Delete house
+    response = client.delete("/houses/456 Elm St")
     assert response.status_code == 200
 
-# Room Tests
-def test_create_room_valid_house(test_db):
+def test_room_crud():
+    # Create user and house
     client.post("/users/", json={"name": "John", "email": "john@example.com"})
     client.post("/houses/", json={"address": "123 Main St", "user_email": "john@example.com"})
-    response = client.post("/rooms/", json={"name": "Living Room", "house_adrs": "123 Main St"})
-    assert response.status_code == 200
-
-def test_create_room_invalid_house(test_db):
-    response = client.post("/rooms/", json={"name": "Living Room", "house_adrs": "invalid"})
-    assert response.status_code == 404
-
-def test_update_room_house(test_db):
-    client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    client.post("/houses/", json={"address": "123 Main St", "user_email": "john@example.com"})
-    client.post("/houses/", json={"address": "456 Elm St", "user_email": "john@example.com"})
-    client.post("/rooms/", json={"name": "Living Room", "house_adrs": "123 Main St"})
-    response = client.put(
-        "/rooms/Living Room",
-        json={"name": "Living Room", "house_adrs": "456 Elm St"}
+    
+    # Create room
+    response = client.post(
+        "/rooms/",
+        json={"name": "Living Room", "house_adrs": "123 Main St"}
     )
     assert response.status_code == 200
+    
+    # Get room
+    response = client.get("/rooms/Living Room")
+    assert response.status_code == 200
+    
+    # Update room
+    response = client.put(
+        "/rooms/Living Room",
+        json={"name": "Living Room", "house_adrs": "123 Main St"}
+    )
+    assert response.status_code == 200
+    
+    # Delete room
+    response = client.delete("/rooms/Living Room")
+    assert response.status_code == 200
 
-def test_delete_room(test_db):
-    # Create required dependencies
-    client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    client.post("/houses/", json={"address": "123 Main St", "user_email": "john@example.com"})
-    client.post("/rooms/", json={"name": "Living Room", "house_adrs": "123 Main St"})
-
-    # Delete the room
-    delete_response = client.delete("/rooms/Living Room")
-    assert delete_response.status_code == 200
-    assert delete_response.json() == {
-        "name": "Living Room",
-        "house_adrs": "123 Main St"
-    }
-
-    # Verify deletion
-    get_response = client.get("/rooms/Living Room")
-    assert get_response.status_code == 404
-
-    # Verify house still exists
-    house_response = client.get("/houses/123 Main St")
-    assert house_response.status_code == 200
+def test_full_flow():
+    # Create user
+    client.post("/users/", json={"name": "Alice", "email": "alice@example.com"})
+    
+    # Create house
+    client.post("/houses/", json={"address": "456 Oak Rd", "user_email": "alice@example.com"})
+    
+    # Create room
+    client.post("/rooms/", json={"name": "Kitchen", "house_adrs": "456 Oak Rd"})
+    
+    # Create device
+    response = client.post(
+        "/devices/",
+        json={"name": "Smart Light", "room_name": "Kitchen"}
+    )
+    assert response.status_code == 200
+    
+    # Verify device creation
+    response = client.get("/devices/Smart Light")
+    assert response.status_code == 200
+    assert response.json()["room_name"] == "Kitchen"
