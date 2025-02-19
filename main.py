@@ -89,8 +89,21 @@ class UserResponse(BaseModel):
 
 class HouseResponse(HouseCreate):
     class Config:
+        orm_model = True
+
+class RoomResponse(BaseModel):
+    name: str
+    house_adrs: str
+    
+    class Config:
         orm_mode = True
 
+class HouseResponse(BaseModel):
+    address: str
+    user_email: str
+    
+    class Config:
+        orm_model = True
 
 #-------------------------------User Endpoints--------------------------#
 #Create new user
@@ -134,12 +147,15 @@ class UserUpdate(BaseModel):
 @app.put("/users/{user_email}", response_model=UserResponse)
 def update_user(user_email: str, user: UserUpdate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.email == user_email).first()
-
-    if db_user is None:
+    if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Prevent email update since it's the primary key
+    if user.email and user.email != user_email:
+        raise HTTPException(status_code=400, detail="Cannot update email address")
     
-    db_user.name = user.name if user.name is not None else db_user.name
-    db_user.email = user.email if user.email is not None else db_user.email
+    if user.name:
+        db_user.name = user.name
 
     db.commit()
     db.refresh(db_user)
@@ -170,7 +186,7 @@ def create_house(house: HouseCreate, db: Session = Depends(get_db)):
     db.refresh(db_house)
     return db_house
 
-@app.get("/houses/", response_model=list[HouseResponse])
+@app.get("/houses/", response_model=HouseResponse)
 def read_houses(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     houses = db.query(House).offset(skip).limit(limit).all()
     return houses
@@ -183,20 +199,19 @@ def read_house(house_address: str, db: Session = Depends(get_db)):
     return house
 
 #Update address of the house
-@app.put("/houses/{house_address}", response_model=HouseCreate)
+@app.put("/houses/{house_address}", response_model=HouseResponse)
 def update_house(house_address: str, house: HouseCreate, db: Session = Depends(get_db)):
     db_house = db.query(House).filter(House.address == house_address).first()
-
     if not db_house:
         raise HTTPException(status_code=404, detail="House not found")
 
-    if house.address:
-        existing_house = db.query(House).filter(House.address == house.address).first()
-        if existing_house:
-            raise HTTPException(status_code=400, detail="A house with this address already exists")
-        
-        db_house.address = house.address 
+    # Check if new address exists
+    if house.address != house_address:
+        existing = db.query(House).filter(House.address == house.address).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Address already exists")
 
+    db_house.address = house.address
     db.commit()
     db.refresh(db_house)
     return db_house
@@ -212,7 +227,7 @@ def delete_house(house_address: str, db: Session = Depends(get_db)):
     return house
 
 #----------------------------Room Endpoints-----------------------------#
-@app.post("/rooms/", response_model=RoomCreate)
+@app.post("/rooms/", response_model=RoomResponse)
 def create_room(room: RoomCreate, db: Session = Depends(get_db)):
     house = db.query(House).filter(House.address == room.house_adrs).first()
     if not house:
@@ -224,12 +239,12 @@ def create_room(room: RoomCreate, db: Session = Depends(get_db)):
     db.refresh(db_room)
     return db_room
 
-@app.get("/rooms/", response_model=list[RoomCreate])
+@app.get("/rooms/", response_model=list[RoomResponse])
 def read_rooms(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     rooms = db.query(Room).offset(skip).limit(limit).all()
     return rooms
 
-@app.get("/rooms/{room_name}", response_model=RoomCreate)
+@app.get("/rooms/{room_name}", response_model=RoomResponse)
 def read_room(room_name: str, db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.name == room_name).first()
     if not room:
