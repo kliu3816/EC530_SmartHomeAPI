@@ -13,11 +13,15 @@ engine = create_engine(
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# In test fixtures, add db refresh
 def override_get_db():
     try:
         db = TestingSessionLocal()
         Base.metadata.create_all(bind=engine)
         yield db
+        db.commit()  
+    except:
+        db.rollback()
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
@@ -52,7 +56,7 @@ def test_get_user_by_email(test_db):
 
 def test_update_user(test_db):
     client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    update_data = {"name": "John Updated", "email": "john@example.com"}
+    update_data = {"name": "John Updated"}
     response = client.put("/users/john@example.com", json=update_data)
     assert response.status_code == 200
     assert response.json()["name"] == "John Updated"

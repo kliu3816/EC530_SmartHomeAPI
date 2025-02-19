@@ -85,25 +85,25 @@ class UserResponse(BaseModel):
     name:str
     email:str
     class Config:
-        orm_model = True
+        from_attributes = True
 
 class HouseResponse(HouseCreate):
     class Config:
-        orm_model = True
+        from_attributes = True
 
 class RoomResponse(BaseModel):
     name: str
     house_adrs: str
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class HouseResponse(BaseModel):
     address: str
     user_email: str
     
     class Config:
-        orm_model = True
+        from_attributes = True
 
 #-------------------------------User Endpoints--------------------------#
 #Create new user
@@ -186,7 +186,7 @@ def create_house(house: HouseCreate, db: Session = Depends(get_db)):
     db.refresh(db_house)
     return db_house
 
-@app.get("/houses/", response_model=HouseResponse)
+@app.get("/houses/", response_model=list[HouseResponse])
 def read_houses(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     houses = db.query(House).offset(skip).limit(limit).all()
     return houses
@@ -211,8 +211,13 @@ def update_house(house_address: str, house: HouseCreate, db: Session = Depends(g
         if existing:
             raise HTTPException(status_code=400, detail="Address already exists")
 
-    db_house.address = house.address
-    db.commit()
+    try:
+        db_house.address = house.address
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Update would violate foreign key constraints")
+
     db.refresh(db_house)
     return db_house
 
