@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 from fastapi import FastAPI,Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 
 app = FastAPI()
 
@@ -86,16 +87,29 @@ class UserResponse(BaseModel):
     class Config:
         orm_model = True
 
+class HouseResponse(HouseCreate):
+    class Config:
+        orm_mode = True
+
 
 #-------------------------------User Endpoints--------------------------#
 #Create new user
 @app.post("/users/", response_model=UserResponse)
-def create_user(user: UserResponse, db: Session = Depends(get_db)):
-    db_user = User(name=user.name, email=user.email)
-    db.add(db_user)    
-    db.commit()
-    db.refresh(db_user)
-    return db_user
+def create_user(user: UserCreate, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.email == user.email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    new_user = User(name=user.name, email=user.email)
+    db.add(new_user)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Email already exists")
+    
+    db.refresh(new_user)
+    return new_user
 
 #Paste all created users
 @app.get("/users/", response_model=list[UserResponse])
@@ -144,7 +158,7 @@ def delete_user(user_email: str, db: Session = Depends(get_db)):
     return db_user
 
 #------------------------------House Endpoints---------------------------#
-@app.post("/houses/", response_model=HouseCreate)
+@app.post("/houses/", response_model=HouseResponse)
 def create_house(house: HouseCreate, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == house.user_email).first()
     if not user:
@@ -156,12 +170,12 @@ def create_house(house: HouseCreate, db: Session = Depends(get_db)):
     db.refresh(db_house)
     return db_house
 
-@app.get("/houses/", response_model=list[HouseCreate])
+@app.get("/houses/", response_model=list[HouseResponse])
 def read_houses(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     houses = db.query(House).offset(skip).limit(limit).all()
     return houses
 
-@app.get("/houses/{house_address}", response_model=HouseCreate)
+@app.get("/houses/{house_address}", response_model=HouseResponse)
 def read_house(house_address: str, db: Session = Depends(get_db)):
     house = db.query(House).filter(House.address == house_address).first()
     if not house:

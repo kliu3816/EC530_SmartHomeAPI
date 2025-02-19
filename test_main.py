@@ -3,14 +3,19 @@ from fastapi.testclient import TestClient
 from main import app, get_db, Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 DATABASE_URL = "sqlite:///:memory:?cache=shared"
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    "sqlite:///:memory:?cache=shared",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool
+)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def override_get_db():
-    db = TestingSessionLocal()
     try:
+        db = TestingSessionLocal()
         Base.metadata.create_all(bind=engine)
         yield db
     finally:
@@ -60,9 +65,13 @@ def test_delete_user(test_db):
     assert response.status_code == 404
 
 def test_create_duplicate_user(test_db):
-    client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    response = client.post("/users/", json={"name": "John", "email": "john@example.com"})
-    assert response.status_code == 500
+    # First request should succeed
+    response1 = client.post("/users/", json={"name": "John", "email": "john@example.com"})
+    assert response1.status_code == 200
+    
+    # Second request should fail
+    response2 = client.post("/users/", json={"name": "John", "email": "john@example.com"})
+    assert response2.status_code == 400  # Changed from 500 to 400 for client error
 
 # House Tests
 def test_create_house_valid_user(test_db):
